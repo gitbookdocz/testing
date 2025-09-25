@@ -10,17 +10,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup Node.js 10
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: '10'
+          cache: 'npm'
 
       - name: Install GitBook CLI
         run: |
           npm install -g gitbook-cli
-          gitbook fetch 3.2.2
+          gitbook fetch 3.2.3
 
       - name: Preprocess Markdown (hints, videos, iframes)
         run: |
@@ -30,7 +31,7 @@ jobs:
 
       - name: Generate SUMMARY.md, icons, and embed placeholders
         run: |
-          python3 <<'PY'
+          python3 <<'EOF'
           import os, re, json
 
           md_files = sorted([f for f in os.listdir('.') if f.endswith('.md')])
@@ -65,8 +66,13 @@ jobs:
           for f in md_files:
               if f in ('README.md','SUMMARY.md'):
                   continue
-              with open(f,'r',encoding='utf-8') as fh:
-                  content = fh.read()
+              
+              try:
+                  with open(f,'r',encoding='utf-8') as fh:
+                      content = fh.read()
+              except UnicodeDecodeError:
+                  print(f"Warning: Could not read {f} as UTF-8, skipping...")
+                  continue
 
               title_m = re.search(r'^\s*#\s*(.+)', content, re.MULTILINE)
               title = title_m.group(1).strip() if title_m else os.path.splitext(f)[0]
@@ -95,9 +101,12 @@ jobs:
                       if title_m:
                           h = title_m.group(0)
                           new_content = content.replace(h,h+'\n\n<div class="embed-placeholder" data-embed-src="%s"></div>\n'%embed_url,1)
-                          with open(f,'w',encoding='utf-8') as fh:
-                              fh.write(new_content)
-                          content = new_content
+                          try:
+                              with open(f,'w',encoding='utf-8') as fh:
+                                  fh.write(new_content)
+                              content = new_content
+                          except Exception as e:
+                              print(f"Warning: Could not write to {f}: {e}")
 
               if icon:
                   summary.append('* [<i class="fa-solid fa-%s"></i> %s](%s)'%(icon,title,f))
@@ -113,11 +122,19 @@ jobs:
                   htmlname=os.path.splitext(f)[0]+'.html'
                   icon_map[htmlname]=entry
 
-          with open('SUMMARY.md','w',encoding='utf-8') as fh:
-              fh.write('\n'.join(summary))
+          try:
+              with open('SUMMARY.md','w',encoding='utf-8') as fh:
+                  fh.write('\n'.join(summary))
+          except Exception as e:
+              print(f"Error writing SUMMARY.md: {e}")
+              exit(1)
 
-          with open(os.path.join('assets','icon-map.json'),'w',encoding='utf-8') as fh:
-              json.dump(icon_map,fh,indent=2)
+          try:
+              with open(os.path.join('assets','icon-map.json'),'w',encoding='utf-8') as fh:
+                  json.dump(icon_map,fh,indent=2)
+          except Exception as e:
+              print(f"Error writing icon-map.json: {e}")
+              exit(1)
 
           injector=[]
           injector.append('(function(){')
@@ -141,9 +158,16 @@ jobs:
           injector.append('iframe.src=src;iframe.frameBorder=0;iframe.allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture";')
           injector.append('iframe.allowFullscreen=true;iframe.loading="lazy";iframe.style.width="100%";iframe.style.height=d.getAttribute("data-embed-height")||"360px";')
           injector.append('d.parentNode.replaceChild(iframe,d);});});})();')
-          with open(os.path.join('assets','icon-inject.js'),'w',encoding='utf-8') as fh:
-              fh.write('\n'.join(injector))
-          PY
+          
+          try:
+              with open(os.path.join('assets','icon-inject.js'),'w',encoding='utf-8') as fh:
+                  fh.write('\n'.join(injector))
+          except Exception as e:
+              print(f"Error writing icon-inject.js: {e}")
+              exit(1)
+          
+          print("Successfully generated all assets!")
+          EOF
 
       - name: Create book.json with styles & scripts
         run: |
@@ -192,3 +216,4 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./_book
+          force_orphan: true
