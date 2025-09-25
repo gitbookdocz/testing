@@ -1,0 +1,35 @@
+{
+  "blog-posts.html": {
+    "icon": "envelopes-bulk"
+  },
+  "collection-gallery.html": {
+    "icon": "arrow-up-right-dots"
+  },
+  "custom-liquid.html": {
+    "icon": "terminal"
+  },
+  "frequently-asked-questions.html": {
+    "icon": "sliders"
+  },
+  "newsletter.html": {
+    "icon": "envelope-open-dollar"
+  },
+  "template-404-page.html": {
+    "icon": "ban"
+  },
+  "template-blog.html": {
+    "icon": "table-cells-large"
+  },
+  "template-cart.html": {
+    "icon": "cart-circle-exclamation"
+  },
+  "template-default-blog-post.html": {
+    "icon": "table-cells-large"
+  },
+  "template-password-page.html": {
+    "icon": "lock"
+  },
+  "template-search-result.html": {
+    "icon": "magnifying-glass"
+  }
+}
