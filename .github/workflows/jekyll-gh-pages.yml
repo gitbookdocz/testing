@@ -22,12 +22,11 @@ jobs:
           npm install -g gitbook-cli
           gitbook fetch 3.2.2
 
-      - name: Preprocess Markdown (hints + iframes)
+      - name: Preprocess Markdown (hints, videos, iframes)
         run: |
-          # Convert GitBook.io {% hint %} blocks to Markdown blockquotes
-          find . -name "*.md" -type f -exec sed -i 's/{% hint style="[^"]*" %}>/> **WARNING:** /g' {} \;
-          find . -name "*.md" -type f -exec sed -i 's/{% hint %}>/> **INFO:** /g' {} \;
-          find . -name "*.md" -type f -exec sed -i 's/{% endhint %}/\n/g' {} \;
+          # Convert all {% hint %} blocks into Markdown blockquotes
+          find . -name "*.md" -type f -exec sed -i -E 's/{% hint[^%]*%}>/> **INFO:** /g' {} \;
+          find . -name "*.md" -type f -exec sed -i -E 's/{% endhint %}//g' {} \;
 
       - name: Generate SUMMARY.md, icons, and embed placeholders
         run: |
@@ -53,7 +52,6 @@ jobs:
                   return 'https://player.vimeo.com/video/' + vid
               return url
 
-          # Icon name fixes map
           fixes = {
               'book': 'book-open',
               'download-alt': 'download',
@@ -82,6 +80,7 @@ jobs:
               iframe_match = re.search(r'^[ \t]*iframe:[ \t]*["\']?(.+?)["\']?\s*$', content, re.MULTILINE)
               iframe = iframe_match.group(1).strip() if iframe_match else None
 
+              # Normalize icon names
               if icon:
                   icon = icon.lower().strip()
                   icon = re.sub(r'^(fa[srb]-)?','',icon)
@@ -136,7 +135,7 @@ jobs:
           injector.append('if(a.querySelector("i"))return;var href=a.getAttribute("href")||a.getAttribute("data-path")||"";')
           injector.append('var key=normalize(href);var entry=map[key]||map[href];')
           injector.append('if(entry&&entry.icon){var i=document.createElement("i");i.className="fa-solid fa-"+entry.icon;')
-          injector.append('a.insertBefore(i,a.firstChild);a.insertBefore(document.createTextNode(" "),a.children[1]);}});});')
+          injector.append('a.insertBefore(i,a.firstChild);a.insertBefore(document.createTextNode(" "), a.children[1]);}});});')
           injector.append('document.querySelectorAll("div.embed-placeholder[data-embed-src]").forEach(function(d){')
           injector.append('var src=d.getAttribute("data-embed-src");if(!src)return;var iframe=document.createElement("iframe");')
           injector.append('iframe.src=src;iframe.frameBorder=0;iframe.allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture";')
