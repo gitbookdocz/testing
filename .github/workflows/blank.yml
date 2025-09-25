@@ -1,0 +1,194 @@
+name: Build and Deploy GitBook
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js 10
+        uses: actions/setup-node@v3
+        with:
+          node-version: '10'
+
+      - name: Install GitBook CLI
+        run: |
+          npm install -g gitbook-cli
+          gitbook fetch 3.2.2
+
+      - name: Preprocess Markdown (hints, videos, iframes)
+        run: |
+          # Convert all {% hint %} blocks into Markdown blockquotes
+          find . -name "*.md" -type f -exec sed -i -E 's/{% hint[^%]*%}>/> **INFO:** /g' {} \;
+          find . -name "*.md" -type f -exec sed -i -E 's/{% endhint %}//g' {} \;
+
+      - name: Generate SUMMARY.md, icons, and embed placeholders
+        run: |
+          python3 <<'PY'
+          import os, re, json
+
+          md_files = sorted([f for f in os.listdir('.') if f.endswith('.md')])
+          os.makedirs('assets', exist_ok=True)
+          summary = ['# Summary', '']
+          icon_map = {}
+
+          def to_embed(url):
+              if not url:
+                  return url
+              if 'youtu.be/' in url:
+                  vid = url.rsplit('/',1)[1].split('?')[0]
+                  return 'https://www.youtube.com/embed/' + vid
+              m = re.search(r'v=([^&]+)', url)
+              if 'youtube.com/watch' in url and m:
+                  return 'https://www.youtube.com/embed/' + m.group(1)
+              if 'vimeo.com/' in url and 'player.vimeo.com' not in url:
+                  vid = url.rsplit('/',1)[1].split('?')[0]
+                  return 'https://player.vimeo.com/video/' + vid
+              return url
+
+          fixes = {
+              'book': 'book-open',
+              'download-alt': 'download',
+              'info-circle': 'circle-info',
+              'warning-sign': 'triangle-exclamation',
+              'note': 'sticky-note',
+              'checkmark': 'check',
+              'cross': 'xmark'
+          }
+
+          for f in md_files:
+              if f in ('README.md','SUMMARY.md'):
+                  continue
+              with open(f,'r',encoding='utf-8') as fh:
+                  content = fh.read()
+
+              title_m = re.search(r'^\s*#\s*(.+)', content, re.MULTILINE)
+              title = title_m.group(1).strip() if title_m else os.path.splitext(f)[0]
+
+              icon_match = re.search(r'^[ \t]*icon:[ \t]*["\']?(.+?)["\']?\s*$', content, re.MULTILINE)
+              icon = icon_match.group(1).strip() if icon_match else None
+
+              video_match = re.search(r'^[ \t]*video:[ \t]*["\']?(.+?)["\']?\s*$', content, re.MULTILINE)
+              video = video_match.group(1).strip() if video_match else None
+
+              iframe_match = re.search(r'^[ \t]*iframe:[ \t]*["\']?(.+?)["\']?\s*$', content, re.MULTILINE)
+              iframe = iframe_match.group(1).strip() if iframe_match else None
+
+              # Normalize icon names
+              if icon:
+                  icon = icon.lower().strip()
+                  icon = re.sub(r'^(fa[srb]-)?','',icon)
+                  icon = icon.replace(' ','-')
+                  if icon in fixes:
+                      icon = fixes[icon]
+
+              embed_url = None
+              if video or iframe:
+                  embed_url = to_embed(video or iframe)
+                  if '<iframe' not in content:
+                      if title_m:
+                          h = title_m.group(0)
+                          new_content = content.replace(h,h+'\n\n<div class="embed-placeholder" data-embed-src="%s"></div>\n'%embed_url,1)
+                          with open(f,'w',encoding='utf-8') as fh:
+                              fh.write(new_content)
+                          content = new_content
+
+              if icon:
+                  summary.append('* [<i class="fa-solid fa-%s"></i> %s](%s)'%(icon,title,f))
+              else:
+                  summary.append('* [%s](%s)'%(title,f))
+
+              entry={}
+              if icon:
+                  entry['icon']=icon
+              if embed_url:
+                  entry['video']=embed_url
+              if entry:
+                  htmlname=os.path.splitext(f)[0]+'.html'
+                  icon_map[htmlname]=entry
+
+          with open('SUMMARY.md','w',encoding='utf-8') as fh:
+              fh.write('\n'.join(summary))
+
+          with open(os.path.join('assets','icon-map.json'),'w',encoding='utf-8') as fh:
+              json.dump(icon_map,fh,indent=2)
+
+          injector=[]
+          injector.append('(function(){')
+          injector.append('window.GITBOOK_ICON_MAP='+json.dumps(icon_map)+';')
+          injector.append('function loadFA(){')
+          injector.append('if(!document.querySelector("link[href*=\'font-awesome\']")){')
+          injector.append('var l=document.createElement("link");l.rel="stylesheet";')
+          injector.append('l.href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css";')
+          injector.append('document.head.appendChild(l);}}')
+          injector.append('function normalize(h){if(!h)return"";return h.split("/").pop().split("#")[0].split("?")[0];}')
+          injector.append('document.addEventListener("DOMContentLoaded",function(){')
+          injector.append('loadFA();var map=window.GITBOOK_ICON_MAP||{};')
+          injector.append('var selectors=["#book-summary a",".book-summary a",".summary a",".nav a"];')
+          injector.append('selectors.forEach(function(sel){document.querySelectorAll(sel).forEach(function(a){')
+          injector.append('if(a.querySelector("i"))return;var href=a.getAttribute("href")||a.getAttribute("data-path")||"";')
+          injector.append('var key=normalize(href);var entry=map[key]||map[href];')
+          injector.append('if(entry&&entry.icon){var i=document.createElement("i");i.className="fa-solid fa-"+entry.icon;')
+          injector.append('a.insertBefore(i,a.firstChild);a.insertBefore(document.createTextNode(" "), a.children[1]);}});});')
+          injector.append('document.querySelectorAll("div.embed-placeholder[data-embed-src]").forEach(function(d){')
+          injector.append('var src=d.getAttribute("data-embed-src");if(!src)return;var iframe=document.createElement("iframe");')
+          injector.append('iframe.src=src;iframe.frameBorder=0;iframe.allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture";')
+          injector.append('iframe.allowFullscreen=true;iframe.loading="lazy";iframe.style.width="100%";iframe.style.height=d.getAttribute("data-embed-height")||"360px";')
+          injector.append('d.parentNode.replaceChild(iframe,d);});});})();')
+          with open(os.path.join('assets','icon-inject.js'),'w',encoding='utf-8') as fh:
+              fh.write('\n'.join(injector))
+          PY
+
+      - name: Create book.json with styles & scripts
+        run: |
+          cat << 'EOF' > book.json
+          {
+            "title": "Your Documentation",
+            "styles": {
+              "website": "styles/website.css"
+            },
+            "plugins": [
+              "-search",
+              "fontsettings",
+              "theme-default"
+            ],
+            "pluginsConfig": {
+              "fontsettings": {
+                "theme": "white"
+              }
+            },
+            "scripts": [
+              "assets/icon-inject.js"
+            ]
+          }
+          EOF
+
+      - name: Add Font Awesome and custom CSS
+        run: |
+          mkdir -p styles
+          cat << 'EOF' > styles/website.css
+          @import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css');
+          .markdown-section h1:before,.markdown-section h2:before,.markdown-section h3:before{
+            font-family:"Font Awesome 6 Free";font-weight:900;margin-right:8px;}
+          #book-summary .summary a i,.book-summary .summary a i,.summary a i,.nav a i{
+            font-family:"Font Awesome 6 Free";font-weight:900;margin-right:8px;display:inline-block;vertical-align:middle;}
+          .embed-placeholder{width:100%;min-height:180px;display:flex;align-items:center;justify-content:center;background:#111;color:#fff;border-radius:6px;margin:8px 0;}
+          .embed-placeholder::after{content:"Video will load...";opacity:0.75;}
+          EOF
+
+      - name: Build GitBook
+        run: |
+          gitbook install --verbose
+          gitbook build --verbose
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./_book
