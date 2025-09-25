@@ -6,15 +6,11 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-and-deploy:
+  build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
 
       - name: Setup Node.js 10
         uses: actions/setup-node@v3
@@ -26,44 +22,11 @@ jobs:
           npm install -g gitbook-cli
           gitbook fetch 3.2.2
 
-      - name: Preprocess markdown files
+      - name: Preprocess Markdown (hints, videos, iframes)
         run: |
-          # Process hint blocks with Python for multi-line support
-          python3 << 'PY'
-          import os
-          import re
-          
-          for root, dirs, files in os.walk('.'):
-              for file in files:
-                  if file.endswith('.md'):
-                      filepath = os.path.join(root, file)
-                      
-                      with open(filepath, 'r', encoding='utf-8') as f:
-                          content = f.read()
-                      
-                      # Replace {% hint style="..." %}...{% endhint %} blocks
-                      content = re.sub(
-                          r'{%\s*hint\s+style="([^"]*)"\s*%}(.*?){%\s*endhint\s*%}',
-                          r'> **\1:** \2',
-                          content,
-                          flags=re.DOTALL
-                      )
-                      
-                      # Replace {% hint %}...{% endhint %} blocks (without style)
-                      content = re.sub(
-                          r'{%\s*hint\s*%}(.*?){%\s*endhint\s*%}',
-                          r'> **INFO:** \1',
-                          content,
-                          flags=re.DOTALL
-                      )
-                      
-                      # Remove any remaining hint tags
-                      content = re.sub(r'{%\s*hint[^%]*%}', '', content)
-                      content = re.sub(r'{%\s*endhint\s*%}', '', content)
-                      
-                      with open(filepath, 'w', encoding='utf-8') as f:
-                          f.write(content)
-          PY
+          # Convert all {% hint %} blocks into Markdown blockquotes
+          find . -name "*.md" -type f -exec sed -i -E 's/{% hint[^%]*%}>/> **INFO:** /g' {} \;
+          find . -name "*.md" -type f -exec sed -i -E 's/{% endhint %}//g' {} \;
 
       - name: Generate SUMMARY.md, icons, and embed placeholders
         run: |
@@ -229,5 +192,3 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./_book
-          publish_branch: gh-pages
-          force_orphan: true
